@@ -4,6 +4,8 @@
 
 ### Features Added
 
+- Adds `getAudioTranscription` and `getAudioTranslation` methods for transcribing and translating audio files.
+
 ### Breaking Changes
 
 ### Bugs Fixed

@@ -22,7 +22,15 @@ import { OpenAIContext } from "../generated/src/rest/index.js";
 import { createOpenAI } from "../generated/src/api/OpenAIContext.js";
 import { GetChatCompletionsOptions } from "./api/models.js";
 import { ImageGenerationOptions } from "./models/options.js";
-import { PipelinePolicy } from "@azure/core-rest-pipeline";
+import { nonAzurePolicy } from "./api/policies/nonAzure.js";
+import { renameKeysToCamelCase } from "./api/util.js";
+import { createFile } from "./api/policies/formDataPolicy.js";
+import {
+  AudioResult,
+  AudioResultFormat,
+  GetAudioTranscriptionOptions,
+  GetAudioTranslationOptions,
+} from "./models/audio.js";
 
 function createOpenAIEndpoint(version: number): string {
   return `https://api.openai.com/v${version}`;
@@ -131,7 +139,7 @@ export class OpenAIClient {
               ...(opts.additionalPolicies ?? []),
               {
                 position: "perCall",
-                policy: getPolicy(),
+                policy: nonAzurePolicy(),
               },
             ],
           }),
@@ -236,32 +244,75 @@ export class OpenAIClient {
   ): Promise<ImageGenerations> {
     return getImages(this._client, prompt, options);
   }
-}
 
-function getPolicy(): PipelinePolicy {
-  const policy: PipelinePolicy = {
-    name: "openAiEndpoint",
-    sendRequest: (request, next) => {
-      const obj = new URL(request.url);
-      const parts = obj.pathname.split("/");
-      switch (parts[parts.length - 1]) {
-        case "completions":
-          if (parts[parts.length - 2] === "chat") {
-            obj.pathname = `/${parts[1]}/chat/completions`;
-          } else {
-            obj.pathname = `/${parts[1]}/completions`;
-          }
-          break;
-        case "embeddings":
-          obj.pathname = `/${parts[1]}/embeddings`;
-          break;
-        case "generations:submit":
-          obj.pathname = `/${parts[1]}/images/generations`;
-      }
-      obj.searchParams.delete("api-version");
-      request.url = obj.toString();
-      return next(request);
-    },
-  };
-  return policy;
+  /**
+   * Returns the transcription of an audio file.
+   * @param deploymentName - The name of the model deployment (when using Azure OpenAI) or model name (when using non-Azure OpenAI) to use for this request.
+   * @param format - The format of the result object. See {@link AudioResultFormat} for possible values.
+   * @param file - The content of the audio file to transcribe.
+   * @param options - The options for this audio transcription request.
+   * @returns The audio transcription result.
+   */
+  async getAudioTranscription<Format extends AudioResultFormat>(
+    deploymentName: string,
+    format: Format,
+    file: Uint8Array | string,
+    options: GetAudioTranscriptionOptions = {}
+  ): Promise<AudioResult<Format>> {
+    this.setModel(deploymentName, options);
+    const { temperature, language, prompt, model, ...rest } = options;
+    const { body, status } = await this._client
+      .pathUnchecked("deployments/{deploymentId}/audio/transcriptions", deploymentName)
+      .post({
+        body: {
+          file: createFile(file),
+          response_format: format,
+          ...(language && { language }),
+          ...(temperature !== undefined ? { temperature } : {}),
+          ...(prompt && { prompt }),
+          ...(model && { model }),
+        },
+        ...rest,
+        contentType: "multipart/form-data",
+      });
+    if (status !== "200") {
+      throw body.error;
+    }
+    return format !== "verbose_json" ? body : (renameKeysToCamelCase(body) as AudioResult<Format>);
+  }
+
+  /**
+   * Returns the translation of an audio file.
+   * @param deploymentName - The name of the model deployment (when using Azure OpenAI) or model name (when using non-Azure OpenAI) to use for this request.
+   * @param format - The format of the result object. See {@link AudioResultFormat} for possible values.
+   * @param file - The content of the audio file to translate.
+   * @param options - The options for this audio translation request.
+   * @returns The audio translation result.
+   */
+  async getAudioTranslation<Format extends AudioResultFormat>(
+    deploymentName: string,
+    format: Format,
+    file: Uint8Array | string,
+    options: GetAudioTranslationOptions = {}
+  ): Promise<AudioResult<Format>> {
+    this.setModel(deploymentName, options);
+    const { temperature, prompt, model, ...rest } = options;
+    const { body, status } = await this._client
+      .pathUnchecked("deployments/{deploymentId}/audio/translations", deploymentName)
+      .post({
+        body: {
+          file: createFile(file),
+          response_format: format,
+          ...(temperature !== undefined ? { temperature } : {}),
+          ...(prompt && { prompt }),
+          ...(model && { model }),
+        },
+        ...rest,
+        contentType: "multipart/form-data",
+      });
+    if (status !== "200") {
+      throw body.error;
+    }
+    return format !== "verbose_json" ? body : (renameKeysToCamelCase(body) as AudioResult<Format>);
+  }
 }
