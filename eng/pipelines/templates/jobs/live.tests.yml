@@ -136,7 +136,7 @@ jobs:
         workingDirectory: $(Build.SourcesDirectory)/eng/tools/eng-package-utils
         displayName: "Get package path"
 
-      - template: ../steps/use-node-test-version.yml
+      # - template: ../steps/use-node-test-version.yml
 
       - script: |
           node ../../../common/scripts/install-run-rushx.js integration-test:$(TestType)
